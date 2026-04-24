@@ -1,6 +1,9 @@
 # Local Claude Code working notes
 .claude.local.md
 
+# MASKonsult internal notes -- never committed
+MASKonsult_Confidential/
+
 # Python-generated files
 __pycache__/
 *.py[oc]
