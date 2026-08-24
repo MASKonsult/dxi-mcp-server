@@ -17,7 +17,7 @@ A Model Context Protocol (MCP) server that exposes Delphix Data Control Tower (D
 main.py                              ← Entry point; FastMCP app, lifespan, startup/shutdown
     ├── toolsgenerator/driver.py     ← Generates tool modules from OpenAPI spec at startup
     ├── tools/__init__.py            ← Dynamic tool registration (priority: generated → pre-built)
-    │       ├── tools/core/meta_tools.py      ← 5 meta-tools for auto mode only
+    │       ├── tools/core/meta_tools.py      ← Retained spec helpers (find_endpoint, get_spec_chunk)
     │       ├── tools/core/tool_factory.py    ← Runtime tool generation from OpenAPI spec
     │       └── tools/*_endpoints_tool.py     ← Pre-built grouped tools (fallback)
     ├── config/config.py             ← Env var loading and validation
@@ -25,6 +25,7 @@ main.py                              ← Entry point; FastMCP app, lifespan, sta
     │       ├── config/toolsets/*.txt          ← Persona toolset definitions
     │       └── config/mappings/manual_confirmation.txt
     ├── dct_client/client.py         ← Async httpx client with retry/backoff
+    ├── testing/cli.py               ← dct-mcp-test CLI — test runner wrapping pytest with layer routing
     └── core/
             ├── logging.py           ← setup_logging(), get_logger(), rotating file handler
             ├── session.py           ← Telemetry session management
@@ -41,11 +42,9 @@ main.py                              ← Entry point; FastMCP app, lifespan, sta
 - Tools loaded from `$TEMP/dct_mcp_tools/` (generated) first, then `tools/*_endpoints_tool.py` (pre-built)
 - Available toolsets: `self_service` (default), `self_service_provision`, `continuous_data_admin`, `platform_admin`, `reporting_insights`
 
-### Auto Mode (`DCT_TOOLSET=auto`)
-- Starts with 5 meta-tools only
-- AI dynamically enables toolsets at runtime via `enable_toolset()` — no restart needed
-- Uses `tools/list_changed` MCP notification to signal tool list updates to clients
-- Not all clients support hot-switching (VS Code Copilot requires chat restart)
+### Dynamic Mode (`DCT_TOOLSET=dynamic`, default)
+- Registers exactly two tools — `discovery` and `execute` — driven by the live OpenAPI spec (`spec_cache.py`)
+- No per-endpoint tool registration; the AI browses and calls the API through the two tools
 
 ---
 
@@ -93,6 +92,52 @@ At startup, `main()` calls `generate_tools_from_openapi()` before registering to
 Generated modules take priority over pre-built `*_endpoints_tool.py` files. Failure is non-fatal.
 
 ---
+
+## MCP Configuration (`.mcp.json`)
+
+The `.mcp.json` file defines how Claude Code connects to the DCT MCP server and other supporting servers:
+
+```json
+{
+  "mcpServers": {
+    "delphix-dct": {
+      "command": "python",
+      "args": ["-m", "dct_mcp_server.main"],
+      "env": {
+        "DCT_API_KEY": "${DCT_API_KEY}",
+        "DCT_BASE_URL": "${DCT_BASE_URL}",
+        "DCT_TOOLSET": "${DCT_TOOLSET:-continuous_data_admin}",
+        ...
+      }
+    }
+  }
+}
+```
+
+Credentials are loaded from `.claude/settings.local.json` at runtime — the `${VAR}` syntax is resolved by Claude's MCP client config loader, not by the server itself.
+
+## Testing Infrastructure
+
+### `testing/cli.py` — dct-mcp-test CLI
+
+Entry point: `dct-mcp-test` (from `project.scripts` in `pyproject.toml`).
+
+Provides a unified test runner for multiple layers:
+- `--layer unit` — unit tests only
+- `--layer integration` — integration tests
+- `--layer functional` — functional tests
+- `--layer ci` — unit + integration + functional (merge-gate suite, no DCT credentials needed)
+- `--layer e2e` — end-to-end tests against a real DCT instance
+- `--layer llm` — Layer 5 LLM-driven tests via Claude Code CLI
+- `--layer scenarios` — subset of LLM tests for scenario execution
+- `--layer all` — all layers except `llm`
+
+Usage:
+```bash
+dct-mcp-test --layer ci                    # Run CI suite locally
+dct-mcp-test --layer e2e --api-key ABC     # Run E2E tests
+dct-mcp-test remote --layer llm            # Run Layer 5 tests against remote DCT
+```
 
 ## Key Platform Behaviors
 

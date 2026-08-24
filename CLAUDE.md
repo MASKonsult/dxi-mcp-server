@@ -34,14 +34,12 @@ When running standalone (dev mode), the server prints the port it listens on (e.
 ```
 
 Key optional env vars:
-- `DCT_TOOLSET` — `self_service` (default), `auto`, `continuous_data_admin`, `platform_admin`, `reporting_insights`, `self_service_provision`
+- `DCT_TOOLSET` — `dynamic` (default), `self_service`, `continuous_data_admin`, `platform_admin`, `reporting_insights`, `self_service_provision`
 - `DCT_VERIFY_SSL` — default `false`
 - `DCT_LOG_LEVEL` — default `INFO`
 - `DCT_TIMEOUT` — seconds, default `30`
 - `DCT_MAX_RETRIES` — default `3`
 - `IS_LOCAL_TELEMETRY_ENABLED` — default `false`
-
-No automated test suite exists. Testing is done by connecting an MCP client to the running server. Logs are written to `logs/dct_mcp_server.log` (rotating) and `logs/sessions/{session_id}.log` (telemetry).
 
 ## Architecture
 
@@ -59,14 +57,6 @@ Toolsets can inherit from others using `@inherit:parent_name`. No code changes a
 ### Grouped Tools Pattern
 
 Instead of one MCP tool per API endpoint, related endpoints are grouped under a single tool with an `action` parameter (e.g., `vdb_tool(action="search", ...)`, `vdb_tool(action="delete", ...)`). This reduces tool count for the AI context. Each action maps to one DCT API endpoint.
-
-### Auto Mode
-
-When `DCT_TOOLSET=auto`, the server starts with only 5 meta-tools. The AI can dynamically enable/disable toolsets at runtime (using `tools/list_changed` MCP notifications) without restarting the server.
-
-Client compatibility for dynamic tool switching:
-- Claude Desktop, Cursor, Continue.dev — fully supported
-- VS Code Copilot — requires chat restart after `enable_toolset`; use a fixed toolset for best experience
 
 ### Confirmation System
 
@@ -112,7 +102,7 @@ src/dct_mcp_server/
 │   ├── __init__.py            # Dynamic tool registration
 │   ├── *_endpoints_tool.py    # Pre-built grouped tools
 │   └── core/
-│       ├── meta_tools.py      # Auto-mode meta-tools
+│       ├── meta_tools.py      # Retained spec helpers (find_endpoint, get_spec_chunk)
 │       └── tool_factory.py    # Dynamic tool generation
 └── toolsgenerator/driver.py   # OpenAPI spec processor
 ```
@@ -120,3 +110,7 @@ src/dct_mcp_server/
 ### Startup Flow
 
 `main.py` → initialize `DCTAPIClient` → `register_all_tools()` (dynamic module discovery in `tools/__init__.py`) → FastMCP stdio transport. Shutdown: lifespan context manager closes HTTP client and ends telemetry session.
+
+## Testing
+
+See [`.claude/test/testing.md`](.claude/test/testing.md) for the full testing approach — manual MCP client testing and automated Docker pytest scripts. Test infrastructure setup (Docker build, credentials, env vars) is in [`.claude/test/test-infra.md`](.claude/test/test-infra.md).
