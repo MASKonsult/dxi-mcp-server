@@ -58,3 +58,5 @@ mcp_server_setup_logfile.txt
 
 # Local docs (not part of review)
 docs/
+# Any 99- directory is local-only, never tracked (~/Repositories/README.md)
+99-*/
