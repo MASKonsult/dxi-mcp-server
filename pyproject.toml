@@ -1,15 +1,22 @@
 [project]
 name = "dct-mcp-server"
-version = "2026.0.2.0-preview"
+version = "2026.0.3.0-preview"
 description = "Delphix DCT API MCP Server - A Model Context Protocol server for the Delphix Data Control Tower API"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastmcp>=2.13.2",
+    "fastmcp>=2.13.2,<4",
+    "mcp>=1.28.1,<2",
+    "cryptography>=50.0.0",
+    "python-dotenv>=1.2.2",
     "httpx>=0.24.0",
     "pyyaml",
     "requests",
-    "urllib3>=2.7.0"
+    "urllib3>=2.7.0",
+    # CVE-2026-7246: click<=8.3.2 has a command-injection flaw in click.edit().
+    # click is pulled in transitively via mcp -> uvicorn. Pin here to guarantee
+    # the patched version (>=8.3.3) is installed regardless of what uvicorn resolves.
+    "click>=8.3.3",
 ]
 
 [project.scripts]
@@ -25,7 +32,7 @@ dev = [
     "pytest-json-report>=1.5.0",
     "starlette>=0.30",
     "uvicorn>=0.27",
-    "click>=8.0",
+    "click>=8.3.3",
 ]
 
 [dependency-groups]
