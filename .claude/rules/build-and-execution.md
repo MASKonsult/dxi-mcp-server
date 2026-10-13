@@ -38,12 +38,17 @@ This allows server restarts without reconfiguring the client.
 |----------|----------|---------|-------|
 | `DCT_API_KEY` | Yes | — | Do not prefix with `apk` |
 | `DCT_BASE_URL` | Yes | — | No `/dct` suffix |
-| `DCT_TOOLSET` | No | `self_service` | `auto`, `self_service`, `self_service_provision`, `continuous_data_admin`, `platform_admin`, `reporting_insights` |
+| `DCT_TOOLSET` | No | `dynamic` | `dynamic`, `self_service`, `self_service_provision`, `continuous_data_admin`, `platform_admin`, `reporting_insights` |
 | `DCT_VERIFY_SSL` | No | `false` | Set `true` in production |
 | `DCT_LOG_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 | `DCT_TIMEOUT` | No | `30` | Seconds |
 | `DCT_MAX_RETRIES` | No | `3` | |
 | `IS_LOCAL_TELEMETRY_ENABLED` | No | `false` | Opt-in telemetry |
+| `DCT_CONFIRMATION_TOKEN_TTL` | No | `3600` | Seconds; TTL for single-use confirmation tokens |
+| `DCT_CONFIRMATION_ENFORCEMENT` | No | `advisory` | `advisory` or `strict`; strict refuses non-elicitation clients |
+| `DCT_CONFIRMATION_FALLBACK` | No | `keyword` | `keyword` or `off`; keyword resolver catches ungated mutating ops |
+| `DCT_GRANT_TTL` | No | `900` | Seconds; TTL for scoped batch grants |
+| `DCT_BATCH_COUNTER_PERSISTENCE` | No | `off` | `off` or `file`; opt-in persistence for velocity counters |
 
 ## Logs
 

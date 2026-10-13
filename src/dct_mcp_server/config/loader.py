@@ -24,46 +24,44 @@ CONFIG_DIR = Path(__file__).parent
 TOOLSETS_DIR = CONFIG_DIR / "toolsets"
 MAPPINGS_DIR = CONFIG_DIR / "mappings"
 
-# Meta-tools that are always available in auto mode
-META_TOOLS = ["list_available_toolsets", "get_toolset_tools", "execute_action"]
-
 
 # ============================================================================
 # TOOLSET LOADING FUNCTIONS
 # ============================================================================
 
+
 @lru_cache(maxsize=10)
 def load_toolset_apis(toolset_name: str) -> Tuple[Dict[str, str], ...]:
     """
     Load all APIs for a toolset from text file.
-    
+
     Args:
         toolset_name: Name of the toolset (e.g., "self_service")
-        
+
     Returns:
         Tuple of dicts: ({"method": "GET", "path": "/vdbs/{id}", "action": "get"}, ...)
-        
+
     Raises:
         ValueError: If toolset file doesn't exist
     """
     toolset_file = TOOLSETS_DIR / f"{toolset_name}.txt"
-    
+
     if not toolset_file.exists():
         raise ValueError(f"Unknown toolset: {toolset_name}")
-    
+
     apis = []
-    
-    with open(toolset_file, 'r') as f:
+
+    with open(toolset_file, "r") as f:
         for line in f:
             line = line.strip()
-            
+
             # Skip empty lines and comments
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
-            
+
             # Handle inheritance
-            if line.startswith('@inherit:'):
-                parent_toolset = line.split(':')[1].strip()
+            if line.startswith("@inherit:"):
+                parent_toolset = line.split(":")[1].strip()
                 # Validate parent exists before loading
                 parent_file = TOOLSETS_DIR / f"{parent_toolset}.txt"
                 if not parent_file.exists():
@@ -74,16 +72,18 @@ def load_toolset_apis(toolset_name: str) -> Tuple[Dict[str, str], ...]:
                 parent_apis = load_toolset_apis(parent_toolset)
                 apis.extend(parent_apis)
                 continue
-            
+
             # Parse METHOD|/path|action format
-            parts = line.split('|')
+            parts = line.split("|")
             if len(parts) >= 3:
-                apis.append({
-                    "method": parts[0].strip(),
-                    "path": parts[1].strip(),
-                    "action": parts[2].strip()
-                })
-    
+                apis.append(
+                    {
+                        "method": parts[0].strip(),
+                        "path": parts[1].strip(),
+                        "action": parts[2].strip(),
+                    }
+                )
+
     return tuple(apis)
 
 
@@ -91,67 +91,69 @@ def load_toolset_apis(toolset_name: str) -> Tuple[Dict[str, str], ...]:
 def load_toolset_grouped_apis(toolset_name: str) -> Dict[str, Dict[str, Any]]:
     """
     Load APIs for a toolset grouped by tool name from # TOOL headers.
-    
+
     Parses toolset files that have structure like:
         # TOOL 1: vdb_tool - VDB Operations
         POST|/vdbs/search|search_vdbs
         GET|/vdbs/{vdbId}|get_vdb
         # TOOL 2: dsource_tool - dSource Operations
         POST|/dsources/search|search_dsources
-    
+
     Args:
         toolset_name: Name of the toolset (e.g., "continuous_data_admin")
-        
+
     Returns:
         Dict mapping tool_name to {description, apis: [{method, path, action}]}
-        
+
     Raises:
         ValueError: If toolset file doesn't exist
     """
     toolset_file = TOOLSETS_DIR / f"{toolset_name}.txt"
-    
+
     if not toolset_file.exists():
         raise ValueError(f"Unknown toolset: {toolset_name}")
-    
+
     grouped = {}
     current_tool = None
     current_description = ""
-    
-    with open(toolset_file, 'r') as f:
+
+    with open(toolset_file, "r") as f:
         for line in f:
             line = line.strip()
-            
+
             # Skip empty lines
             if not line:
                 continue
-            
+
             # Parse TOOL header: # TOOL N: tool_name - Description
-            if line.startswith('# TOOL') and ':' in line:
+            if line.startswith("# TOOL") and ":" in line:
                 # Extract tool name and description
                 # Format: # TOOL 1: vdb_tool - VDB Operations
-                after_colon = line.split(':', 1)[1].strip()  # "vdb_tool - VDB Operations"
-                if ' - ' in after_colon:
-                    current_tool, current_description = after_colon.split(' - ', 1)
+                after_colon = line.split(":", 1)[
+                    1
+                ].strip()  # "vdb_tool - VDB Operations"
+                if " - " in after_colon:
+                    current_tool, current_description = after_colon.split(" - ", 1)
                     current_tool = current_tool.strip()
                     current_description = current_description.strip()
                 else:
                     current_tool = after_colon.strip()
                     current_description = ""
-                
+
                 if current_tool and current_tool not in grouped:
                     grouped[current_tool] = {
                         "description": current_description,
-                        "apis": []
+                        "apis": [],
                     }
                 continue
-            
+
             # Skip other comments
-            if line.startswith('#'):
+            if line.startswith("#"):
                 continue
-            
+
             # Handle inheritance - load parent's grouped APIs
-            if line.startswith('@inherit:'):
-                parent_toolset = line.split(':')[1].strip()
+            if line.startswith("@inherit:"):
+                parent_toolset = line.split(":")[1].strip()
                 parent_file = TOOLSETS_DIR / f"{parent_toolset}.txt"
                 if not parent_file.exists():
                     raise ValueError(
@@ -161,57 +163,62 @@ def load_toolset_grouped_apis(toolset_name: str) -> Dict[str, Dict[str, Any]]:
                 parent_grouped = load_toolset_grouped_apis(parent_toolset)
                 for tool_name, tool_data in parent_grouped.items():
                     if tool_name not in grouped:
-                        grouped[tool_name] = {"description": tool_data["description"], "apis": []}
+                        grouped[tool_name] = {
+                            "description": tool_data["description"],
+                            "apis": [],
+                        }
                     grouped[tool_name]["apis"].extend(tool_data["apis"])
                 continue
-            
+
             # Parse METHOD|/path|action format
-            parts = line.split('|')
+            parts = line.split("|")
             if len(parts) >= 3 and current_tool:
                 api_entry = {
                     "method": parts[0].strip(),
                     "path": parts[1].strip(),
-                    "action": parts[2].strip()
+                    "action": parts[2].strip(),
                 }
                 grouped[current_tool]["apis"].append(api_entry)
-    
+
     return grouped
 
 
 def load_toolset_metadata(toolset_name: str) -> Optional[Dict[str, Any]]:
     """
     Load toolset metadata by parsing headers from the toolset file.
-    
+
     Each toolset file has headers like:
         # Self Service Toolset - 6 Tools
         # Description: Perform classic Self Service activities
         # Target users: Developers, QA engineers who need to work with VDBs
-        
+
     Args:
         toolset_name: Name of the toolset
-        
+
     Returns:
         Dict with name, description, tool_count, primary_use_case or None if not found
     """
     toolset_file = TOOLSETS_DIR / f"{toolset_name}.txt"
-    
+
     if not toolset_file.exists():
         return None
-    
+
     metadata = {"name": toolset_name}
     tool_count = 0
-    
-    with open(toolset_file, 'r') as f:
+
+    with open(toolset_file, "r") as f:
         for line in f:
             line = line.strip()
-            
-            if line.startswith('# Description:'):
-                metadata["description"] = line.replace('# Description:', '').strip()
-            elif line.startswith('# Target users:'):
-                metadata["primary_use_case"] = line.replace('# Target users:', '').strip()
-            elif line.startswith('# TOOL') and ':' in line:
+
+            if line.startswith("# Description:"):
+                metadata["description"] = line.replace("# Description:", "").strip()
+            elif line.startswith("# Target users:"):
+                metadata["primary_use_case"] = line.replace(
+                    "# Target users:", ""
+                ).strip()
+            elif line.startswith("# TOOL") and ":" in line:
                 tool_count += 1
-    
+
     metadata["tool_count"] = tool_count
     return metadata
 
@@ -219,18 +226,18 @@ def load_toolset_metadata(toolset_name: str) -> Optional[Dict[str, Any]]:
 def load_all_toolsets_metadata() -> Dict[str, Dict[str, Any]]:
     """
     Load metadata for all available toolsets by scanning the toolsets directory.
-    
+
     Returns:
         Dict mapping toolset names to their metadata
     """
     toolsets = {}
-    
+
     for toolset_file in TOOLSETS_DIR.glob("*.txt"):
         toolset_name = toolset_file.stem  # e.g., "self_service"
         metadata = load_toolset_metadata(toolset_name)
         if metadata:
             toolsets[toolset_name] = metadata
-    
+
     return toolsets
 
 
@@ -238,117 +245,239 @@ def load_all_toolsets_metadata() -> Dict[str, Dict[str, Any]]:
 # MANUAL CONFIRMATION FUNCTIONS
 # ============================================================================
 
+
 @lru_cache(maxsize=1)
 def load_manual_confirmation_rules() -> Tuple[Dict[str, Any], ...]:
     """
     Load manual confirmation rules.
-    
+
     Format: METHOD|path_pattern|confirmation_level|message_template
-    
+
     Returns:
         Tuple of rule dicts with method, path_pattern, level, and message
     """
     rules = []
     config_file = MAPPINGS_DIR / "manual_confirmation.txt"
-    
+
     if not config_file.exists():
         logger.warning(f"Manual confirmation file not found: {config_file}")
         return tuple(rules)
-    
-    with open(config_file, 'r') as f:
+
+    with open(config_file, "r") as f:
         for line in f:
             line = line.strip()
-            
+
             # Skip empty lines and comments
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
-            
-            parts = line.split('|')
+
+            parts = line.split("|")
             if len(parts) >= 4:
-                rules.append({
-                    "method": parts[0].strip(),
-                    "path_pattern": parts[1].strip(),
-                    "level": parts[2].strip(),
-                    "message": parts[3].strip()
-                })
-    
+                rules.append(
+                    {
+                        "method": parts[0].strip(),
+                        "path_pattern": parts[1].strip(),
+                        "level": parts[2].strip(),
+                        "message": parts[3].strip(),
+                    }
+                )
+
     return tuple(rules)
 
 
 def _path_matches(path: str, pattern: str) -> bool:
     """
     Check if a path matches a pattern with path parameters.
-    
+
     Args:
         path: Actual API path (e.g., "/vdbs/vdb-123/delete")
         pattern: Pattern with placeholders (e.g., "/vdbs/{vdbId}/delete")
-        
+
     Returns:
         True if path matches pattern
     """
     # Convert path parameters to regex
-    regex_pattern = re.sub(r'\{[^}]+\}', r'[^/]+', pattern)
+    regex_pattern = re.sub(r"\{[^}]+\}", r"[^/]+", pattern)
     regex_pattern = f"^{regex_pattern}$"
     return bool(re.match(regex_pattern, path))
+
+
+def _is_destructive_delete(method: str, path: str) -> bool:
+    """Return True for destructive delete operations.
+
+    Covers any HTTP DELETE, plus the DCT convention of POST to a ``.../delete``
+    action path (e.g. ``/vdbs/{vdbId}/delete``). Used as a safety net so a delete
+    never executes without confirmation just because it lacks an explicit rule in
+    manual_confirmation.txt.
+    """
+    m = (method or "").upper()
+    if m == "DELETE":
+        return True
+    if m == "POST" and path.rstrip("/").endswith("/delete"):
+        return True
+    return False
+
+
+@lru_cache(maxsize=1)
+def _load_read_exclusions() -> frozenset:
+    """
+    Load read exclusion path patterns from read_exclusions.txt.
+
+    Returns:
+        frozenset of path patterns that are safe reads and should not be
+        gated by the keyword fallback confirmation resolver.
+    """
+    exclusions_file = MAPPINGS_DIR / "read_exclusions.txt"
+
+    if not exclusions_file.exists():
+        logger.warning(f"Read exclusions file not found: {exclusions_file}")
+        return frozenset()
+
+    patterns = []
+    with open(exclusions_file, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            patterns.append(line)
+
+    return frozenset(patterns)
+
+
+def _is_read_exclusion(path: str) -> bool:
+    """
+    Check if a path matches any read exclusion pattern.
+
+    Args:
+        path: API endpoint path to check
+
+    Returns:
+        True if path is a known safe read and should not be confirmation-gated
+    """
+    patterns = _load_read_exclusions()
+    for pattern in patterns:
+        if _path_matches(path, pattern):
+            return True
+        # Also check prefix match for patterns without trailing wildcards
+        if path.startswith(pattern):
+            return True
+    return False
 
 
 def get_confirmation_for_operation(method: str, path: str) -> Dict[str, Any]:
     """
     Get confirmation requirements for an API operation.
-    
+
     Args:
         method: HTTP method (GET, POST, DELETE, etc.)
         path: API endpoint path
-        
+
     Returns:
         Dict with level, message, conditional flag, and threshold_days
     """
     rules = load_manual_confirmation_rules()
-    
+
     for rule in rules:
         # Check method match (wildcard * matches any method)
         if rule["method"] != "*" and rule["method"] != method:
             continue
-        
+
         # Check path match
         if _path_matches(path, rule["path_pattern"]):
             level = rule["level"]
             conditional = ":" in level
-            
+            level_parts = level.split(":") if conditional else [level]
+            level_name = level_parts[0]
+            threshold_N = (
+                int(level_parts[1]) if conditional and len(level_parts) > 1 else None
+            )
+            threshold_T = (
+                int(level_parts[2]) if conditional and len(level_parts) > 2 else None
+            )
+
             return {
-                "level": level.split(":")[0] if conditional else level,
+                "level": level_name,
                 "message": rule["message"],
                 "conditional": conditional,
-                "threshold_days": int(level.split(":")[1]) if conditional else None
+                "threshold_days": threshold_N,
+                "threshold_T": threshold_T,
+                # The matched rule's path template (e.g. "/vdbs/{vdbId}/refresh_by_snapshot").
+                # Used to key velocity counters and standing grants per operation-type
+                # rather than per resolved resource.
+                "path_pattern": rule["path_pattern"],
             }
-    
+
+    # Safety net: a destructive delete must never run unconfirmed just because
+    # it has no explicit rule above. Explicit rules (matched in the loop) still
+    # take precedence and may set a different level or a tailored message.
+    if _is_destructive_delete(method, path):
+        return {
+            "level": "manual",
+            "message": (
+                f"This is a destructive delete operation ({method} {path}). "
+                "Please confirm before proceeding — this action cannot be undone."
+            ),
+            "conditional": False,
+            "threshold_days": None,
+            "threshold_T": None,
+            "path_pattern": path,
+        }
+
+    # Keyword fallback — only when DCT_CONFIRMATION_FALLBACK=keyword and path is not a read exclusion
+    _fallback = os.environ.get("DCT_CONFIRMATION_FALLBACK", "keyword").lower()
+    if _fallback == "keyword" and not _is_read_exclusion(path):
+        # Import here to avoid circular imports (dynamic_confirmation imports from loader)
+        try:
+            from dct_mcp_server.tools.core.dynamic_confirmation import (
+                get_confirmation_for_operation_dynamic,
+            )
+
+            dynamic_result = get_confirmation_for_operation_dynamic(method, path)
+            if dynamic_result.get("level", "none") != "none":
+                # Keyword fallback has no rule template; key on the resolved path.
+                dynamic_result.setdefault("path_pattern", path)
+                return dynamic_result
+        except ImportError:
+            pass
+
     # No matching rule - no confirmation needed
-    return {"level": "none", "message": None, "conditional": False, "threshold_days": None}
+    return {
+        "level": "none",
+        "message": None,
+        "conditional": False,
+        "threshold_days": None,
+        "threshold_T": None,
+        "path_pattern": path,
+    }
 
 
 def requires_confirmation(method: str, path: str) -> bool:
     """
     Quick check if an operation requires any form of confirmation.
-    
+
     Args:
         method: HTTP method
         path: API endpoint path
-        
+
     Returns:
         True if confirmation is required
     """
     confirmation = get_confirmation_for_operation(method, path)
-    return confirmation["level"] != "none"
+    # batch_check is a dynamic-mode velocity level evaluated by the dynamic
+    # execute gate against a live per-identity counter; on its own (static path)
+    # it does not require per-call confirmation.
+    return confirmation["level"] not in ("none", "batch_check")
 
 
 # ============================================================================
 # TOOLSET SELECTION FUNCTIONS
 # ============================================================================
 
+
 def get_available_toolsets() -> List[str]:
     """
     Get list of available toolsets by scanning the toolsets directory.
-    
+
     Returns:
         List of toolset names (e.g., ["self_service", "platform_admin"])
     """
@@ -358,59 +487,59 @@ def get_available_toolsets() -> List[str]:
 def get_configured_toolset() -> str:
     """
     Get the configured toolset from environment variable.
-    
+
     Environment Variable: DCT_TOOLSET
-    
+
     Returns:
-        Toolset name or 'self_service' as default
-        
+        Toolset name or 'dynamic' as default
+
     Raises:
         ValueError: If invalid toolset name specified
     """
-    toolset = os.environ.get("DCT_TOOLSET", "self_service").lower().strip()
-    
-    if toolset == "auto":
-        return "auto"
-    
+    toolset = os.environ.get("DCT_TOOLSET", "dynamic").lower().strip()
+
+    if toolset == "dynamic":
+        return toolset
+
     available = get_available_toolsets()
     if toolset not in available:
         raise ValueError(
-            f"Invalid toolset: {toolset}. "
-            f"Valid values: auto, {', '.join(available)}"
+            f"Invalid toolset: {toolset}. Valid values: dynamic, {', '.join(available)}"
         )
-    
+
     return toolset
 
 
-def is_auto_mode() -> bool:
+def is_dynamic_mode() -> bool:
     """
-    Check if server is running in auto (dynamic discovery) mode.
-    
+    Check if server is running in dynamic 2-tool mode.
+
     Returns:
-        True if DCT_TOOLSET=auto
+        True if DCT_TOOLSET=dynamic
     """
-    return get_configured_toolset() == "auto"
+    return get_configured_toolset() == "dynamic"
 
 
 # ============================================================================
 # TOOLSET TOOLS EXTRACTION
 # ============================================================================
 
+
 def get_tools_for_toolset(toolset_name: str) -> List[Dict[str, Any]]:
     """
     Get list of tools available in a toolset with their actions.
-    
+
     Uses the # TOOL X: headers from the toolset file for accurate grouping.
-    
+
     Args:
         toolset_name: Name of the toolset
-        
+
     Returns:
         List of tool dicts with name, description, and actions
     """
     # Use the grouped API loader that parses # TOOL headers
     grouped_apis = load_toolset_grouped_apis(toolset_name)
-    
+
     # Build result list
     tools = []
     for tool_name, tool_data in grouped_apis.items():
@@ -418,23 +547,23 @@ def get_tools_for_toolset(toolset_name: str) -> List[Dict[str, Any]]:
         tool_info = {
             "name": tool_name,
             "description": tool_data.get("description", ""),
-            "actions": sorted(set(actions))  # Remove duplicates and sort
+            "actions": sorted(set(actions)),  # Remove duplicates and sort
         }
         tools.append(tool_info)
-    
+
     return sorted(tools, key=lambda t: t["name"])
 
 
 def get_modules_for_toolset(toolset_name: str) -> List[str]:
     """
     Get the list of tool module names required for a toolset.
-    
+
     This maps toolset logical tools to their implementation modules.
     Used by register_all_tools to filter which modules to load.
-    
+
     Args:
         toolset_name: Name of the toolset
-        
+
     Returns:
         List of module names (e.g., ["dataset_endpoints_tool", "job_endpoints_tool"])
     """
@@ -452,51 +581,43 @@ def get_modules_for_toolset(toolset_name: str) -> List[str]:
         "data_tool": "dataset_endpoints_tool",  # Merged tool
         "snapshot_bookmark_tool": "dataset_endpoints_tool",  # Merged tool
         "timeflow_tool": "dataset_endpoints_tool",
-        
         # Job operations
         "job_tool": "job_endpoints_tool",
-        
         # Environment operations
         "environment_tool": "environment_endpoints_tool",
         "environment_source_tool": "environment_endpoints_tool",  # Merged tool
-        
         # Toolkit operations (AppData plugin schemas)
         "toolkit_tool": "environment_endpoints_tool",
-
         # Engine operations
         "engine_tool": "engine_endpoints_tool",
-        
         # Compliance operations
         "masking_tool": "compliance_endpoints_tool",
         "connector_tool": "compliance_endpoints_tool",
         "execution_tool": "compliance_endpoints_tool",
-        
         # Reports operations
         "reporting_tool": "reports_endpoints_tool",
-        
         # IAM operations (if we have the module)
         "iam_tool": "iam_endpoints_tool",
         "tag_tool": "iam_endpoints_tool",
-        
         # Template operations (if we have the module)
         "database_template_tool": "template_endpoints_tool",
         "hook_template_tool": "template_endpoints_tool",
-        
         # Policy operations (if we have the module)
         "virtualization_policy_tool": "policy_endpoints_tool",
         "replication_tool": "policy_endpoints_tool",
-        
         # Platform admin merged tool
         "admin_platform_tool": "admin_endpoints_tool",
-        
         # Instance tools (CDB/vCDB)
         "instance_tool": "misc_endpoints_tool",
+        # Dynamic 2-tool mode tools (DCT_TOOLSET=dynamic)
+        "discovery": "dynamic",
+        "execute": "dynamic",
     }
-    
+
     # Get the tools used by this toolset
     tools = get_tools_for_toolset(toolset_name)
     tool_names = [t["name"] for t in tools]
-    
+
     # Map to modules
     modules = set()
     for tool_name in tool_names:
@@ -504,7 +625,7 @@ def get_modules_for_toolset(toolset_name: str) -> List[str]:
             modules.add(TOOL_TO_MODULE[tool_name])
         else:
             logger.warning(f"No module mapping for tool: {tool_name}")
-    
+
     return list(modules)
 
 
@@ -512,14 +633,17 @@ def get_modules_for_toolset(toolset_name: str) -> List[str]:
 # CACHE MANAGEMENT
 # ============================================================================
 
+
 def clear_cache():
     """
     Clear all cached configuration data.
-    
+
     Call this if configuration files change during runtime.
     """
     load_toolset_apis.cache_clear()
+    load_toolset_grouped_apis.cache_clear()
     load_manual_confirmation_rules.cache_clear()
+    _load_read_exclusions.cache_clear()
     logger.info("Configuration cache cleared")
 
 
@@ -527,47 +651,48 @@ def clear_cache():
 # VALIDATION FUNCTIONS
 # ============================================================================
 
+
 def validate_toolset_config(toolset_name: str) -> List[str]:
     """
     Validate a toolset configuration file.
-    
+
     Args:
         toolset_name: Name of the toolset to validate
-        
+
     Returns:
         List of validation errors (empty if valid)
     """
     errors = []
-    
+
     try:
         apis = load_toolset_apis(toolset_name)
-        
+
         if not apis:
             errors.append(f"Toolset '{toolset_name}' has no APIs defined")
-                
+
     except ValueError as e:
         errors.append(str(e))
     except Exception as e:
         errors.append(f"Error loading toolset: {e}")
-    
+
     return errors
 
 
 def validate_all_configs() -> Dict[str, List[str]]:
     """
     Validate all configuration files.
-    
+
     Returns:
         Dict mapping config names to list of errors
     """
     results = {}
-    
+
     # Validate each toolset
     for toolset_name in get_available_toolsets():
         errors = validate_toolset_config(toolset_name)
         if errors:
             results[f"toolset:{toolset_name}"] = errors
-    
+
     # Validate confirmation rules
     try:
         rules = load_manual_confirmation_rules()
@@ -575,5 +700,5 @@ def validate_all_configs() -> Dict[str, List[str]]:
             results["manual_confirmation.txt"] = ["No confirmation rules defined"]
     except Exception as e:
         results["manual_confirmation.txt"] = [str(e)]
-    
+
     return results

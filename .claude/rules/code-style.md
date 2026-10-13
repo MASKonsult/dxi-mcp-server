@@ -3,7 +3,9 @@
 ## Language and Runtime
 
 - Python 3.11+
-- Async-first: tool registration and DCT client are async; tool functions themselves are sync (wrapped by `@log_tool_execution`)
+- Async-first: tool registration and DCT client are async
+- Pre-built `*_endpoints_tool.py` tool functions are **sync** (wrapped by `@log_tool_execution`)
+- Dynamic mode `execute` tool (`tools/core/dynamic.py`) is **async** — it calls `ctx.elicit()` and awaits the DCT client; do not add `@log_tool_execution` to it or to `discovery`
 
 ## Exception Handling
 
@@ -46,7 +48,7 @@ Do not inline DCT API paths as raw strings in tool functions. Paths come from th
 | Entry point | `main.py` | Startup/shutdown only — no business logic |
 | Tool registration | `tools/__init__.py` | Discovery and loading only |
 | Tool implementations | `tools/*_endpoints_tool.py` | Grouped tools, one file per resource domain |
-| Auto mode | `tools/core/meta_tools.py` | Only registered when `DCT_TOOLSET=auto` |
+| Spec helpers | `tools/core/meta_tools.py` | Retained `find_endpoint` / `get_spec_chunk` utilities (not registered as MCP tools) |
 | Dynamic generation | `tools/core/tool_factory.py` | Runtime tool generation from OpenAPI spec |
 | Config loading | `config/loader.py` | All toolset and confirmation parsing |
 | HTTP client | `dct_client/client.py` | All DCT API calls go through `DCTAPIClient` |

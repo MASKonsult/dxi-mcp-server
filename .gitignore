@@ -12,6 +12,9 @@ dist/
 wheels/
 *.egg-info
 
+# Test artifacts
+.pytest_cache/
+
 # Virtual environments
 .venv
 venv/
@@ -56,7 +59,16 @@ Thumbs.db
 logs/
 mcp_server_setup_logfile.txt
 
-# Local docs (not part of review)
-docs/
+# Git worktrees (project-local isolation)
+.worktrees/
+.venv-live/
+
+# OpenAPI spec cache (downloaded from DCT — do not commit)
+tests/fixtures/api-external.yaml
+
+# Connector secrets (use .secrets.yaml.example as template)
+tests/fixtures/connectors/.secrets.yaml
+.coverage
+
 # Any 99- directory is local-only, never tracked (~/Repositories/README.md)
 99-*/

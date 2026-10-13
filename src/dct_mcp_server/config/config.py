@@ -6,8 +6,13 @@ import os
 from typing import Any, Dict
 
 
-def get_dct_config() -> Dict[str, Any]:
+def get_dct_config(require_key: bool = True) -> Dict[str, Any]:
     """Get DCT configuration from environment variables"""
+    import tempfile
+
+    _default_spec_cache_path = os.path.join(
+        tempfile.gettempdir(), "dct_mcp_tools", "api-external-dynamic.yaml"
+    )
 
     config = {
         "api_key": os.getenv("DCT_API_KEY"),
@@ -16,13 +21,51 @@ def get_dct_config() -> Dict[str, Any]:
         "timeout": int(os.getenv("DCT_TIMEOUT", "30")),
         "max_retries": int(os.getenv("DCT_MAX_RETRIES", "3")),
         "log_level": os.getenv("DCT_LOG_LEVEL", "INFO").upper(),
-        "is_local_telemetry_enabled": os.getenv("IS_LOCAL_TELEMETRY_ENABLED", "false").lower()
+        "is_local_telemetry_enabled": os.getenv(
+            "IS_LOCAL_TELEMETRY_ENABLED", "false"
+        ).lower()
         == "true",
-        "toolset": os.getenv("DCT_TOOLSET", "self_service").lower().strip(),
+        "toolset": os.getenv("DCT_TOOLSET", "dynamic").lower().strip(),
+        # Dynamic mode (DCT_TOOLSET=dynamic) spec cache settings
+        "spec_cache_path": os.getenv("DCT_SPEC_CACHE_PATH", _default_spec_cache_path),
+        "spec_max_age_hours": int(os.getenv("DCT_SPEC_MAX_AGE_HOURS", "24")),
+        "auth_mode": os.getenv("DCT_AUTH_MODE", "standalone").lower().strip(),
+        # Caller identity for embedded auth over stdio. A stdio pipe carries no
+        # request headers, so the host passes the caller's DCT account id in the
+        # child process environment at spawn — one process per caller.
+        "client_id": (os.getenv("DCT_CLIENT_ID") or "").strip() or None,
+        # Confirmation system settings
+        "confirmation_token_ttl": int(os.getenv("DCT_CONFIRMATION_TOKEN_TTL", "3600")),
+        "confirmation_enforcement": os.getenv(
+            "DCT_CONFIRMATION_ENFORCEMENT", "advisory"
+        ).lower(),
+        "confirmation_fallback": os.getenv(
+            "DCT_CONFIRMATION_FALLBACK", "keyword"
+        ).lower(),
+        # Set by an embedding host that presents its own trusted human-approval
+        # UI (the DCT AI Assistant's Allow once / Allow always buttons). Such a
+        # host already has out-of-band evidence of human intent, so the elevated
+        # and manual levels' typed-resource-name checks add nothing: on that
+        # path the *model* supplies confirmed_resource_name, not a person, which
+        # makes it a string echo rather than an authorization step. Off by
+        # default so a generic MCP client -- which has no trusted approval
+        # surface -- keeps the full friction. The confirmation_token gate is
+        # unaffected either way (DLPXECO-14611).
+        "confirmation_host_approval": os.getenv(
+            "DCT_CONFIRMATION_HOST_APPROVAL", "false"
+        ).lower()
+        == "true",
+        "grant_ttl": int(os.getenv("DCT_GRANT_TTL", "900")),
+        # Tier-2 auto standing grant: how many executions of an impactful op-type
+        # a single confirmation authorizes before re-prompting (confirm-once → run N).
+        "confirmation_batch_size": int(os.getenv("DCT_CONFIRMATION_BATCH_SIZE", "10")),
+        "batch_counter_persistence": os.getenv(
+            "DCT_BATCH_COUNTER_PERSISTENCE", "off"
+        ).lower(),
     }
 
     # Validate required configuration
-    if not config["api_key"]:
+    if not config["api_key"] and config["auth_mode"] != "embedded" and require_key:
         raise ValueError(
             "DCT_API_KEY environment variable is required. "
             "Please set it to your Delphix DCT API key."
@@ -34,6 +77,24 @@ def get_dct_config() -> Dict[str, Any]:
         raise ValueError(
             f"Invalid log level: {config['log_level']}. "
             f"Must be one of: {', '.join(valid_log_levels)}"
+        )
+
+    # Validate auth_mode
+    if config["auth_mode"] not in ("standalone", "embedded"):
+        raise ValueError(
+            f"Invalid DCT_AUTH_MODE: {config['auth_mode']}. "
+            "Must be one of: standalone, embedded"
+        )
+
+    # Embedded auth over stdio has no per-request channel to carry identity, so
+    # the caller id must be present in the environment at startup. Fail fast
+    # here rather than on the first tool call. Checked only when require_key is
+    # set (i.e. at startup); resolve_auth() raises AuthError at call time.
+    if require_key and config["auth_mode"] == "embedded" and not config["client_id"]:
+        raise ValueError(
+            "DCT_CLIENT_ID is required when DCT_AUTH_MODE=embedded. A stdio "
+            "pipe carries no request headers, so the caller's DCT account id "
+            "must be supplied in the environment when the process is spawned."
         )
 
     return config
@@ -58,26 +119,68 @@ def print_config_help():
     print(
         "  IS_LOCAL_TELEMETRY_ENABLED Enable local telemetry data collection (default: false)"
     )
+    print("  DCT_TOOLSET      Active toolset (default: dynamic). Options:")
     print(
-        "  DCT_TOOLSET      Active toolset (default: self_service). Options:"
+        "                   - dynamic: 2-tool mode (discovery + execute) driven by live OpenAPI spec (default)"
     )
-    print(
-        "                   - auto: Dynamic discovery mode with meta-tools"
-    )
-    print(
-        "                   - self_service: Basic VDB operations for developers/QA"
-    )
+    print("                   - self_service: Basic VDB operations for developers/QA")
     print(
         "                   - self_service_provision: Extended self-service with provisioning"
     )
+    print("                   - continuous_data_admin: Full DBA/CD admin operations")
+    print("                   - platform_admin: System administration tools")
+    print("                   - reporting_insights: Read-only reporting and analytics")
+    print()
+    print("Auth optional variables:")
     print(
-        "                   - continuous_data_admin: Full DBA/CD admin operations"
+        "  DCT_AUTH_MODE    Authentication mode (default: standalone, options: standalone, embedded)"
     )
     print(
-        "                   - platform_admin: System administration tools"
+        "                   In 'embedded' mode, DCT_API_KEY is not required (auth is handled externally)"
     )
     print(
-        "                   - reporting_insights: Read-only reporting and analytics"
+        "  DCT_CLIENT_ID    Caller's DCT account id. REQUIRED when DCT_AUTH_MODE=embedded."
+    )
+    print(
+        "                   The server runs over stdio, whose pipe carries no headers, so the"
+    )
+    print(
+        "                   host spawns one process per caller with the id in its environment."
+    )
+    print()
+    print("Dynamic mode (DCT_TOOLSET=dynamic) optional variables:")
+    print(
+        "  DCT_SPEC_CACHE_PATH     Path to cache the downloaded OpenAPI spec "
+        "(default: $TEMP/dct_mcp_tools/api-external-dynamic.yaml)"
+    )
+    print(
+        "  DCT_SPEC_MAX_AGE_HOURS  Hours before re-downloading the spec (default: 24)"
+    )
+    print()
+    print("Confirmation system optional variables:")
+    print(
+        "  DCT_CONFIRMATION_TOKEN_TTL       TTL in seconds for confirmation tokens (default: 3600)"
+    )
+    print(
+        "  DCT_CONFIRMATION_ENFORCEMENT     Enforcement mode: strict or advisory (default: advisory)"
+    )
+    print(
+        "  DCT_CONFIRMATION_FALLBACK        Fallback mode when token absent: keyword or off (default: keyword)"
+    )
+    print(
+        "  DCT_CONFIRMATION_HOST_APPROVAL   Host presents its own trusted approval UI, so elevated/manual"
+    )
+    print(
+        "                                   skip the typed-resource-name checks (default: false)"
+    )
+    print(
+        "  DCT_GRANT_TTL                    TTL in seconds for batch grants (default: 900)"
+    )
+    print(
+        "  DCT_CONFIRMATION_BATCH_SIZE      Executions authorized per confirmation for impactful ops (default: 10)"
+    )
+    print(
+        "  DCT_BATCH_COUNTER_PERSISTENCE    Batch counter persistence: off or file (default: off)"
     )
     print()
     print("Example:")
@@ -86,4 +189,5 @@ def print_config_help():
     print("  export DCT_VERIFY_SSL=true")
     print("  export DCT_LOG_LEVEL=DEBUG")
     print("  export DCT_TOOLSET=self_service")
+    print("  export DCT_AUTH_MODE=standalone")
     print()

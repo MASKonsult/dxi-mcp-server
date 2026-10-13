@@ -1,0 +1,58 @@
+{
+  "mcpServers": {
+    "delphix-dct": {
+        "command": "python",
+        "args": ["-m", "dct_mcp_server.main"],
+        "env": {
+          "DCT_API_KEY": "${DCT_API_KEY}",
+          "DCT_BASE_URL": "${DCT_BASE_URL}",
+          "DCT_TOOLSET": "${DCT_TOOLSET:-continuous_data_admin}",
+          "DCT_VERIFY_SSL": "false",
+          "DCT_LOG_LEVEL": "ERROR",
+          "DCT_TIMEOUT": "30",
+          "DCT_MAX_RETRIES": "3"
+        }
+    },
+    "atlassian": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.atlassian.com/v1/mcp"
+      ]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp"
+      ]
+    },
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "your-github-token"
+      }
+    },
+    "delphix-dct": {
+      "command": "bash",
+      "args": [
+        "start_mcp_server_uv.sh"
+      ],
+      "env": {
+        "DCT_API_KEY": "1.Iu19RLpv2itW6ChD6H40IfyWP0vN3AEmOv1anVuQmyuU9qAO2fs7fppBnLKsYrRN",
+        "DCT_BASE_URL": "https://localhost",
+        "DCT_TOOLSET": "dynamic",
+        "DCT_VERIFY_SSL": "false",
+        "DCT_LOG_LEVEL": "INFO",
+        "DCT_TIMEOUT": "30",
+        "DCT_MAX_RETRIES": "3",
+        "IS_LOCAL_TELEMETRY_ENABLED": "false"
+      }
+    }
+  }
+}
