@@ -36,3 +36,10 @@ The `FastMCP` app is a module-level global (`app`). The `lifespan` async context
 ## `toolsgenerator/driver.py` — OpenAPI Tool Generator
 
 `generate_tools_from_openapi()` is called at startup before tool registration. It downloads `{DCT_BASE_URL}/dct/static/api-external.yaml`, processes it, and writes generated tool modules to `$TEMP/dct_mcp_tools/`. These take priority over pre-built `*_endpoints_tool.py` files. Falls back to the bundled `docs/api-external.yaml` if the download fails.
+
+
+---
+
+## Git Commits
+
+Never add Co-Authored-By, co-author, or any attribution to Claude or any AI tool in commit messages. Commits contain Matt's work. That does not constitute authorship of any kind.

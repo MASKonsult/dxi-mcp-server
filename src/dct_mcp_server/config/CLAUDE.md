@@ -63,3 +63,10 @@ METHOD|path_pattern|confirmation_level|message_template
 
 - `config.py` — Reads and validates all environment variables. Add new env vars here.
 - `loader.py` — Parses `.txt` files; results are `@lru_cache`d. Call `clear_cache()` if config files change at runtime.
+
+
+---
+
+## Git Commits
+
+Never add Co-Authored-By, co-author, or any attribution to Claude or any AI tool in commit messages. Commits contain Matt's work. That does not constitute authorship of any kind.

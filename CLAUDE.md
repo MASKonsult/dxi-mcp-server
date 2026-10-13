@@ -141,3 +141,9 @@ src/dct_mcp_server/
 ## Testing
 
 See [`.claude/test/testing.md`](.claude/test/testing.md) for the full testing approach — manual MCP client testing and automated Docker pytest scripts. Test infrastructure setup (Docker build, credentials, env vars) is in [`.claude/test/test-infra.md`](.claude/test/test-infra.md).
+
+---
+
+## Git Commits
+
+Never add Co-Authored-By, co-author, or any attribution to Claude or any AI tool in commit messages. Commits contain Matt's work. That does not constitute authorship of any kind.

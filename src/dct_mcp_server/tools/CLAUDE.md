@@ -46,3 +46,10 @@ When adding a new tool, register it in `config/loader.py:get_modules_for_toolset
 
 - `meta_tools.py` — Retained spec-reading helpers (`find_endpoint`, `get_spec_chunk`); formerly the auto-mode meta-tools. Auto mode was removed (DLPXECO-14257); these are kept as standalone utilities and are not registered as MCP tools.
 - `tool_factory.py` — Generates tool functions at runtime from the OpenAPI spec. Downloads spec from `{DCT_BASE_URL}/dct/static/api-external.yaml`; falls back to `docs/api-external.yaml`. Generated tools are cached in `$TEMP/dct_mcp_tools/` and take priority over pre-built modules.
+
+
+---
+
+## Git Commits
+
+Never add Co-Authored-By, co-author, or any attribution to Claude or any AI tool in commit messages. Commits contain Matt's work. That does not constitute authorship of any kind.
