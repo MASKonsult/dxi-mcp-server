@@ -12,12 +12,14 @@ Configuration Files:
 
 import os
 import re
-import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Callable, Dict, List, Any, Tuple, Optional
 from functools import lru_cache
 
-logger = logging.getLogger(__name__)
+from dct_mcp_server.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Configuration directories
 CONFIG_DIR = Path(__file__).parent
@@ -344,6 +346,180 @@ def _load_read_exclusions() -> frozenset:
     return frozenset(patterns)
 
 
+@lru_cache(maxsize=1)
+def load_server_instructions() -> str:
+    """
+    Load the cross-cutting vocabulary and domain-model guidance passed to the
+    MCP client as the server's ``instructions`` (PPM-1129).
+
+    Source is ``config/server_instructions.md`` unless the
+    ``DCT_SERVER_INSTRUCTIONS`` environment variable names another file.
+
+    Returns:
+        The instructions text, or an empty string if no file is available.
+        A missing or unreadable file is never fatal: the server starts
+        without vocabulary guidance rather than failing.
+    """
+    override = (os.getenv("DCT_SERVER_INSTRUCTIONS") or "").strip() or None
+    instructions_file = (
+        Path(override) if override else CONFIG_DIR / "server_instructions.md"
+    )
+
+    if not instructions_file.is_file():
+        logger.warning(
+            f"Server instructions file not found or is not a file: {instructions_file}"
+        )
+        return ""
+
+    try:
+        with open(instructions_file, "r", encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning(f"Could not read server instructions {instructions_file}: {e}")
+        return ""
+    # HTML comments are for maintainers (provenance, reviewer notes). Clients keep
+    # only the first few thousand characters of the instructions, so none of that
+    # may be sent to the model.
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+# Optional guard directives a vocabulary.txt line may carry after the term
+# pair. Each value is a comma-separated, case-insensitive word list; an entry
+# of the form "@name" expands to the words of an "@signals name=..." line.
+_VOCABULARY_GUARD_KEYS = (
+    "skip_if_preceded_by",
+    "skip_if_followed_by",
+    "only_if_text_mentions",
+    "skip_if_text_mentions",
+)
+
+
+def _expand_signal_words(words: str, signals: Dict[str, frozenset]) -> frozenset:
+    expanded: set = set()
+    for word in (w.strip().lower() for w in words.split(",")):
+        if not word:
+            continue
+        if word.startswith("@"):
+            if word[1:] not in signals:
+                logger.warning(f"Unknown vocabulary signal set {word!r}")
+                continue
+            expanded |= signals[word[1:]]
+        else:
+            expanded.add(word)
+    return frozenset(expanded)
+
+
+@lru_cache(maxsize=1)
+def load_vocabulary_preserved() -> frozenset:
+    """
+    Tokens vocabulary.txt marks with ``@preserve`` (PPM-1129): API values a client
+    must send back exactly as DCT defines them (for example the ``link_type`` values),
+    so they are never rewritten even though they contain a retired word.
+    """
+    vocab_file = MAPPINGS_DIR / "vocabulary.txt"
+    tokens: set = set()
+    try:
+        with open(vocab_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("@preserve"):
+                    tokens.update(
+                        t.strip()
+                        for t in line[len("@preserve") :].split(",")
+                        if t.strip()
+                    )
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning(f"Could not read vocabulary preserve list {vocab_file}: {e}")
+        return frozenset()
+    return frozenset(tokens)
+
+
+@lru_cache(maxsize=1)
+def load_vocabulary_rules() -> Tuple[Dict[str, Any], ...]:
+    """
+    Load the internal-to-canonical term rules from mappings/vocabulary.txt.
+
+    Used to translate upstream text (raw DCT error bodies, OpenAPI summaries)
+    into customer-facing terminology before it is shown to a user (PPM-1129).
+
+    Line formats::
+
+        @signals name=word,word,...
+        internal|canonical[|guard=word,word...]...
+
+    where ``guard`` is one of ``skip_if_preceded_by``, ``skip_if_followed_by``,
+    ``only_if_text_mentions`` or ``skip_if_text_mentions``, and a guard word
+    of the form ``@name`` expands to a previously declared signal set. Several
+    lines may share an internal term; the first one whose text conditions hold
+    wins.
+
+    Returns:
+        Tuple of rule dicts with keys ``internal``, ``canonical`` and one
+        frozenset per guard key, ordered longest-internal-first (stable, so
+        file order is kept between lines for the same term). Empty if the
+        file is absent.
+    """
+    vocab_file = MAPPINGS_DIR / "vocabulary.txt"
+
+    if not vocab_file.exists():
+        logger.warning(f"Vocabulary file not found: {vocab_file}")
+        return ()
+
+    rules: List[Dict[str, Any]] = []
+    signals: Dict[str, frozenset] = {}
+    try:
+        with open(vocab_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("@signals"):
+                    name, _, words = line[len("@signals") :].partition("=")
+                    signals[name.strip().lower()] = _expand_signal_words(words, signals)
+                    continue
+                parts = line.split("|")
+                if len(parts) < 2:
+                    continue
+                internal, canonical = parts[0].strip(), parts[1].strip()
+                if not (internal and canonical):
+                    continue
+                rule: Dict[str, Any] = {
+                    "internal": internal,
+                    "canonical": canonical,
+                    **{key: frozenset() for key in _VOCABULARY_GUARD_KEYS},
+                }
+                for directive in parts[2:]:
+                    key, _, words = directive.partition("=")
+                    key = key.strip()
+                    if key not in _VOCABULARY_GUARD_KEYS:
+                        logger.warning(
+                            f"Unknown vocabulary guard {key!r} for term {internal!r}"
+                        )
+                        continue
+                    rule[key] = _expand_signal_words(words, signals)
+                rules.append(rule)
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning(f"Could not read vocabulary rules {vocab_file}: {e}")
+        return ()
+
+    # Longest first: "delphix engine" must win over a bare "engine" entry.
+    rules.sort(key=lambda rule: len(rule["internal"]), reverse=True)
+    return tuple(rules)
+
+
+@lru_cache(maxsize=1)
+def load_vocabulary_map() -> Tuple[Tuple[str, str], ...]:
+    """
+    The vocabulary rules as plain (internal_term, canonical_term) pairs.
+
+    Guard directives are dropped; see :func:`load_vocabulary_rules` for the
+    full rules that :func:`~dct_mcp_server.tools.core.vocabulary.to_canonical`
+    applies.
+    """
+    return tuple((r["internal"], r["canonical"]) for r in load_vocabulary_rules())
+
+
 def _is_read_exclusion(path: str) -> bool:
     """
     Check if a path matches any read exclusion pattern.
@@ -570,7 +746,7 @@ def get_modules_for_toolset(toolset_name: str) -> List[str]:
     # Mapping from logical tool names to implementation modules
     # Based on which module implements APIs for which path patterns
     TOOL_TO_MODULE = {
-        # Dataset operations (vdb, dsource, snapshot, bookmark, vdb-group, timeflow, source)
+        # Dataset operations (vdb, dsource, snapshot, bookmark, vdb-group, timeline, source)
         "vdb_tool": "dataset_endpoints_tool",
         "vdb_group_tool": "dataset_endpoints_tool",
         "dsource_tool": "dataset_endpoints_tool",
@@ -580,14 +756,14 @@ def get_modules_for_toolset(toolset_name: str) -> List[str]:
         "data_connection_tool": "dataset_endpoints_tool",
         "data_tool": "dataset_endpoints_tool",  # Merged tool
         "snapshot_bookmark_tool": "dataset_endpoints_tool",  # Merged tool
-        "timeflow_tool": "dataset_endpoints_tool",
+        "timeline_tool": "dataset_endpoints_tool",
         # Job operations
         "job_tool": "job_endpoints_tool",
         # Environment operations
         "environment_tool": "environment_endpoints_tool",
         "environment_source_tool": "environment_endpoints_tool",  # Merged tool
-        # Toolkit operations (AppData plugin schemas)
-        "toolkit_tool": "environment_endpoints_tool",
+        # Connector schema operations
+        "connector_schema_tool": "environment_endpoints_tool",
         # Engine operations
         "engine_tool": "engine_endpoints_tool",
         # Compliance operations
@@ -600,7 +776,7 @@ def get_modules_for_toolset(toolset_name: str) -> List[str]:
         "iam_tool": "iam_endpoints_tool",
         "tag_tool": "iam_endpoints_tool",
         # Template operations (if we have the module)
-        "database_template_tool": "template_endpoints_tool",
+        "vdb_template_tool": "template_endpoints_tool",
         "hook_template_tool": "template_endpoints_tool",
         # Policy operations (if we have the module)
         "virtualization_policy_tool": "policy_endpoints_tool",
@@ -630,8 +806,151 @@ def get_modules_for_toolset(toolset_name: str) -> List[str]:
 
 
 # ============================================================================
+# APPDATA OPERATIONS LOADING FUNCTIONS
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class AppDataOperation:
+    """Parsed record from appdata_operations.txt (DLPXECO-14781)."""
+
+    method: str  # upper-case HTTP method, e.g. "POST"
+    path_template: str  # e.g. "/dsources/appdata" or "/vdbs/{vdbId}"
+    sub_objects: dict  # {sub_object_name: definition_name}
+    chains: list  # list of raw chain strings; resolver in Task 6 parses them
+
+
+@lru_cache(maxsize=1)
+def load_appdata_operations() -> tuple:
+    """Parse appdata_operations.txt and return (ops, toolkit_path).
+
+    Malformed lines are skipped with a warning; never raises.
+    Returns:
+        Tuple of (list[AppDataOperation], toolkit_path_str)
+    """
+    mapping_path = MAPPINGS_DIR / "appdata_operations.txt"
+    try:
+        text = mapping_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("AppData mapping file not found: %s", exc)
+        return ([], "")
+
+    ops: List[AppDataOperation] = []
+    toolkit_path = ""
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("@toolkit|"):
+            toolkit_path = line.split("|", 1)[1].strip()
+            continue
+        parts = line.split("|")
+        if len(parts) != 4:
+            logger.warning(
+                "AppData mapping: malformed line (expected 4 fields): %r", line
+            )
+            continue
+        method, path_tmpl, sub_obj_str, chain_str = parts
+        method = method.strip().upper()
+        path_tmpl = path_tmpl.strip()
+
+        # Parse sub_objects: "key:def,key2:def2"
+        sub_objects: Dict[str, str] = {}
+        for pair in sub_obj_str.split(","):
+            pair = pair.strip()
+            if ":" not in pair:
+                logger.warning(
+                    "AppData mapping: malformed sub_object pair %r in line %r",
+                    pair,
+                    line,
+                )
+                continue
+            k, v = pair.split(":", 1)
+            sub_objects[k.strip()] = v.strip()
+        if not sub_objects:
+            logger.warning("AppData mapping: no sub_objects in line %r", line)
+            continue
+
+        # Parse chains: semicolon-separated raw chain strings
+        chains: List[str] = []
+        for chain_raw in chain_str.split(";"):
+            chain_raw = chain_raw.strip()
+            if not chain_raw:
+                continue
+            chains.append(chain_raw)
+
+        ops.append(
+            AppDataOperation(
+                method=method,
+                path_template=path_tmpl,
+                sub_objects=sub_objects,
+                chains=chains,
+            )
+        )
+
+    return (ops, toolkit_path)
+
+
+def match_appdata_operation(method: str, path: str) -> Optional[AppDataOperation]:
+    """Return the first AppDataOperation matching *method* and *path*.
+
+    Strips a leading /dct/v<N> or /dct prefix before matching.
+    Prefers literal (non-parameterised) templates over parameterised ones.
+    Returns None if no match.
+    """
+    # Normalise path — strip /dct/v<N> or /dct prefix
+    norm = re.sub(r"^/dct/v\d+", "", path)
+    norm = re.sub(r"^/dct", "", norm)
+    if not norm.startswith("/"):
+        norm = "/" + norm
+
+    method_upper = method.upper()
+    ops, _ = load_appdata_operations()
+
+    literal_match: Optional[AppDataOperation] = None
+    param_match: Optional[AppDataOperation] = None
+
+    for op in ops:
+        if op.method != method_upper:
+            continue
+        if not _path_matches(norm, op.path_template):
+            continue
+        if "{" in op.path_template:
+            if param_match is None:
+                param_match = op
+        else:
+            if literal_match is None:
+                literal_match = op
+
+    return literal_match if literal_match is not None else param_match
+
+
+# ============================================================================
 # CACHE MANAGEMENT
 # ============================================================================
+
+
+# Hook registry: functions to call when clear_cache() resets loader caches.
+# Keys are fully-qualified hook names (e.g. "dct_mcp_server.tools.core.vocabulary.clear_hook").
+# Re-registering with the same name replaces the old entry, so a module reload
+# never leaves a stale hook pointing at old cached-function objects.
+_CACHE_CLEAR_HOOKS: Dict[str, Callable[[], None]] = {}
+
+
+def register_cache_clear_hook(name: str, fn: Callable[[], None]) -> None:
+    """Register (or replace) a cache-clear hook.
+
+    ``name`` is a stable qualified string that uniquely identifies the hook
+    (e.g. ``"dct_mcp_server.tools.core.vocabulary.clear_hook"``). If a hook
+    with the same name is already registered it is replaced, so a module
+    reload never leaves two copies of the same hook in the list.
+
+    Args:
+        name: Unique qualified name for this hook.
+        fn:   Zero-argument callable; called at the end of ``clear_cache()``.
+    """
+    _CACHE_CLEAR_HOOKS[name] = fn
 
 
 def clear_cache():
@@ -639,12 +958,25 @@ def clear_cache():
     Clear all cached configuration data.
 
     Call this if configuration files change during runtime.
+    Registered hooks (e.g. vocabulary.py's translator caches) are called
+    after the loader caches are cleared, so the next rule-load reads the file
+    fresh before the translator re-compiles.
     """
     load_toolset_apis.cache_clear()
     load_toolset_grouped_apis.cache_clear()
     load_manual_confirmation_rules.cache_clear()
     _load_read_exclusions.cache_clear()
+    load_server_instructions.cache_clear()
+    load_vocabulary_map.cache_clear()
+    load_vocabulary_rules.cache_clear()
+    load_vocabulary_preserved.cache_clear()
+    load_appdata_operations.cache_clear()
     logger.info("Configuration cache cleared")
+    for hook_name, hook_fn in list(_CACHE_CLEAR_HOOKS.items()):
+        try:
+            hook_fn()
+        except Exception as e:
+            logger.warning(f"Cache-clear hook {hook_name!r} raised: {e}", exc_info=True)
 
 
 # ============================================================================
