@@ -188,3 +188,5 @@ See [`.claude/test/testing.md`](.claude/test/testing.md) for the full testing ap
 ## Git Commits
 
 Never add Co-Authored-By, co-author, or any attribution to Claude or any AI tool in commit messages. Commits contain Matt's work. That does not constitute authorship of any kind.
+
+@AGENTS.md
